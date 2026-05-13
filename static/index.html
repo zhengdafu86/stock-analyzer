@@ -191,6 +191,21 @@ a{color:var(--green);text-decoration:none}
 .action-btn:active{background:rgba(255,255,255,.05)}
 .action-btn.danger{color:var(--red)}
 .action-btn.cancel{color:var(--text2);border-top:1px solid var(--border);margin-top:4px}
+
+/* 自定义 Prompt 输入框 */
+.prompt-box{margin-top:16px}
+.prompt-header{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.prompt-icon{font-size:18px}
+.prompt-label{font-size:14px;font-weight:600;color:#fff}
+.prompt-input{width:100%;background:rgba(255,255,255,.05);border:1.5px solid rgba(0,212,170,.2);border-radius:12px;color:var(--text);font-size:14px;padding:12px 14px;resize:vertical;outline:none;font-family:inherit;line-height:1.6;transition:border-color .2s}
+.prompt-input:focus{border-color:var(--green)}
+.prompt-input::placeholder{color:#5a5a6a}
+.prompt-actions{display:flex;gap:10px;margin-top:10px}
+.prompt-btn{flex:1;padding:10px 0;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:transform .1s,opacity .2s;-webkit-appearance:none}
+.prompt-btn:active{transform:scale(.97)}
+.prompt-btn-send{background:linear-gradient(135deg,var(--green),#00b894);color:#fff}
+.prompt-btn-send:disabled{opacity:.5;cursor:not-allowed}
+.prompt-btn-reset{background:rgba(255,255,255,.08);color:var(--text2)}
 </style>
 </head>
 <body>
@@ -248,10 +263,21 @@ a{color:var(--green);text-decoration:none}
 <!-- ========== 分析报告页 ========== -->
 <div id="page-report" class="page safe-top safe-bottom">
   <div class="report-back" onclick="showPage('home')">‹ 返回自选</div>
+  <div class="prompt-box card" id="prompt-box">
+    <div class="prompt-header">
+      <span class="prompt-icon">💬</span>
+      <span class="prompt-label">向 DeepSeek 提问</span>
+    </div>
+    <textarea id="prompt-input" class="prompt-input" rows="3" placeholder="输入你想问的..."></textarea>
+    <div class="prompt-actions">
+      <button class="prompt-btn prompt-btn-send" id="prompt-send" onclick="sendPrompt()">发送分析</button>
+      <button class="prompt-btn prompt-btn-reset" onclick="resetPrompt()">恢复默认</button>
+    </div>
+  </div>
   <div id="report-content"></div>
   <div id="report-loading" class="loading" style="display:none">
     <div class="spinner"></div>
-    <div class="loading-text">正在生成分析报告...</div>
+    <div class="loading-text">DeepSeek 正在分析，请稍候...</div>
   </div>
 </div>
 
@@ -563,24 +589,54 @@ function showToast(msg){
 }
 
 // ============ 报告逻辑 ============
+let currentReportCode='';
+
+function getDefaultPrompt(code){
+  const stock=watchlist.find(s=>s.code===code);
+  const name=stock?stock.name:code;
+  return `结合今天最新的消息，帮我分析"${name}"这支股票`;
+}
+
 function openReport(code){
+  currentReportCode=code;
   showPage('report');
+  // 设置默认 prompt
+  document.getElementById('prompt-input').value=getDefaultPrompt(code);
   loadReport(code);
 }
 
-async function loadReport(code){
+function sendPrompt(){
+  if(!currentReportCode)return;
+  const prompt=document.getElementById('prompt-input').value.trim();
+  loadReport(currentReportCode, prompt);
+}
+
+function resetPrompt(){
+  if(!currentReportCode)return;
+  document.getElementById('prompt-input').value=getDefaultPrompt(currentReportCode);
+}
+
+async function loadReport(code, userPrompt){
   const content=document.getElementById('report-content');
   const loading=document.getElementById('report-loading');
+  const sendBtn=document.getElementById('prompt-send');
   content.innerHTML='';loading.style.display='flex';
+  sendBtn.disabled=true;sendBtn.textContent='分析中...';
 
   try{
-    const d=await api('/stocks/'+code+'/report');
+    let d;
+    if(userPrompt){
+      d=await api('/stocks/'+code+'/report',{method:'POST',body:{prompt:userPrompt}});
+    }else{
+      d=await api('/stocks/'+code+'/report');
+    }
     loading.style.display='none';
     content.innerHTML=renderReport(d);
   }catch(e){
     loading.style.display='none';
     content.innerHTML='<div class="empty"><div class="empty-title">加载失败</div><div class="empty-desc">请检查网络连接后重试</div><button class="btn btn-primary" onclick="loadReport(\''+code+'\')">重试</button></div>';
   }
+  sendBtn.disabled=false;sendBtn.textContent='发送分析';
 }
 
 function renderReport(d){

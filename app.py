@@ -89,12 +89,21 @@ def api_batch_quotes():
     set_cache(cache_key, quotes)
     return jsonify(quotes)
 
-@app.route('/api/stocks/<code>/report')
+@app.route('/api/stocks/<code>/report', methods=['GET', 'POST'])
 def api_report(code):
-    cache_key = f'report:{code}'
-    cached = get_cached(cache_key, ttl=config.REPORT_CACHE_TTL)
-    if cached:
-        return jsonify(cached)
+    # POST 请求支持自定义 prompt
+    user_prompt = ''
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        user_prompt = data.get('prompt', '')
+
+    # 有自定义 prompt 时不使用缓存
+    if not user_prompt:
+        cache_key = f'report:{code}'
+        cached = get_cached(cache_key, ttl=config.REPORT_CACHE_TTL)
+        if cached:
+            return jsonify(cached)
+
     try:
         quote = get_stock_quote(code)
         if not quote:
@@ -102,7 +111,7 @@ def api_report(code):
         kline = get_kline_data(code, period='daily', count=120)
         technical = calculate_all_indicators(kline)
         fundamental = get_fundamentals(code)
-        ai_analysis = generate_ai_analysis(quote, technical, fundamental)
+        ai_analysis = generate_ai_analysis(quote, technical, fundamental, user_prompt)
         report = {
             **quote,
             'date': datetime.now().strftime('%Y-%m-%d'),
@@ -110,7 +119,8 @@ def api_report(code):
             'fundamental': fundamental,
             'ai_analysis': ai_analysis
         }
-        set_cache(cache_key, report)
+        if not user_prompt:
+            set_cache(f'report:{code}', report)
         return jsonify(report)
     except Exception as e:
         print(f"生成报告失败 {code}: {e}")

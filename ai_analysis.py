@@ -15,9 +15,10 @@ except ImportError:
     OpenAI = None
 
 
-def generate_ai_analysis(stock_info: dict, technical: dict, fundamental: dict) -> dict:
+def generate_ai_analysis(stock_info: dict, technical: dict, fundamental: dict, user_prompt: str = '') -> dict:
     """
     使用 AI 生成综合分析报告
+    user_prompt: 用户自定义的分析要求，会追加到系统 prompt 后面
     返回: { score, signal, detail, ai_provider }
     """
     provider = config.AI_PROVIDER
@@ -25,7 +26,7 @@ def generate_ai_analysis(stock_info: dict, technical: dict, fundamental: dict) -
     if provider == 'none':
         return _rule_based_analysis(stock_info, technical, fundamental)
 
-    prompt = _build_analysis_prompt(stock_info, technical, fundamental)
+    prompt = _build_analysis_prompt(stock_info, technical, fundamental, user_prompt)
 
     try:
         if provider == 'deepseek':
@@ -41,7 +42,7 @@ def generate_ai_analysis(stock_info: dict, technical: dict, fundamental: dict) -
         return _rule_based_analysis(stock_info, technical, fundamental)
 
 
-def _build_analysis_prompt(stock_info: dict, technical: dict, fundamental: dict) -> str:
+def _build_analysis_prompt(stock_info: dict, technical: dict, fundamental: dict, user_prompt: str = '') -> str:
     """构建提示词 —— 让 AI 像在 DeepSeek App 里回答一样"""
     today = datetime.now().strftime('%Y年%m月%d日')
 
@@ -77,7 +78,9 @@ def _build_analysis_prompt(stock_info: dict, technical: dict, fundamental: dict)
 - 资产负债率: {fundamental.get('debt_ratio', 0)}%
 - 所属行业: {fundamental.get('industry', '--')}
 
-请你像在 DeepSeek 对话中一样，用自然的中文 Markdown 格式给我一份完整的分析报告。要求：
+{'【用户要求】\n' + user_prompt + '\n\n请基于以上数据，按照用户的要求进行分析。' if user_prompt else '请你像在 DeepSeek 对话中一样，帮我全面分析这只股票。'}
+
+要求：
 1. 使用 Markdown 标题、加粗、列表等排版，让内容清晰易读
 2. 涵盖：趋势研判、技术分析、基本面分析、资金面、操作建议、风险提示
 3. 引用具体数据，不要空泛

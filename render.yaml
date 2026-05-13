@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: stock-analyzer
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: AI_PROVIDER
+        value: none
+      - key: FLASK_DEBUG
+        value: "False"
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+    plan: free

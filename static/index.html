@@ -172,15 +172,6 @@ a{color:var(--green);text-decoration:none}
 /* 免责声明 */
 .disclaimer{text-align:center;padding:24px 12px 40px;font-size:11px;color:var(--text2);line-height:1.6}
 
-/* 设置 */
-.setting-group{margin-bottom:20px}
-.setting-group-label{font-size:12px;color:var(--text2);margin-bottom:6px;padding-left:4px;display:block}
-.setting-row{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border)}
-.setting-row:last-child{border:none}
-.setting-lbl{font-size:15px;color:var(--text)}
-.setting-val{font-size:14px;color:var(--green);text-align:right}
-.setting-val input{background:none;border:none;outline:none;color:var(--green);font-size:14px;text-align:right;width:200px}
-.setting-arrow{color:#5a5a6a;font-size:18px}
 
 /* 加载 */
 .loading{display:flex;flex-direction:column;align-items:center;padding:80px 0}
@@ -211,6 +202,7 @@ a{color:var(--green);text-decoration:none}
 .prompt-btn-send{background:linear-gradient(135deg,var(--green),#00b894);color:#fff}
 .prompt-btn-send:disabled{opacity:.5;cursor:not-allowed}
 .prompt-btn-reset{background:rgba(255,255,255,.08);color:var(--text2)}
+.report-timestamp{text-align:center;padding:16px 0 8px;font-size:12px;color:var(--text2)}
 </style>
 </head>
 <body>
@@ -286,56 +278,15 @@ a{color:var(--green);text-decoration:none}
   </div>
 </div>
 
-<!-- ========== 设置页 ========== -->
-<div id="page-settings" class="page safe-top safe-bottom">
-  <div class="page-title">设置</div>
-
-  <div class="setting-group">
-    <span class="setting-group-label">服务器配置</span>
-    <div class="card" style="padding:0">
-      <div class="setting-row">
-        <span class="setting-lbl">后端地址</span>
-        <span class="setting-val"><input id="server-url-input" placeholder="http://192.168.x.x:5000/api" onblur="saveServerUrl()"></span>
-      </div>
-    </div>
-  </div>
-
-  <div class="setting-group">
-    <span class="setting-group-label">数据管理</span>
-    <div class="card" style="padding:0">
-      <div class="setting-row" onclick="exportWatchlist()" style="cursor:pointer">
-        <span class="setting-lbl">导出自选股</span>
-        <span class="setting-arrow">›</span>
-      </div>
-      <div class="setting-row" onclick="clearAllData()" style="cursor:pointer">
-        <span class="setting-lbl">清除全部数据</span>
-        <span class="setting-arrow">›</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="setting-group">
-    <span class="setting-group-label">关于</span>
-    <div class="card" style="padding:0">
-      <div class="setting-row">
-        <span class="setting-lbl">版本</span>
-        <span class="setting-val" style="color:var(--text2)">1.0.0</span>
-      </div>
-    </div>
-  </div>
-
-  <div style="text-align:center;padding:40px 0;font-size:12px;color:var(--text2)">智能股票分析 · AI 驱动</div>
-</div>
-
 <!-- 底部导航 -->
 <div class="tab-bar">
   <div class="tab-item active" onclick="showPage('home')">
     <span class="tab-icon">📈</span>
     <span class="tab-label">自选股</span>
   </div>
-  <div class="tab-item" onclick="showPage('settings')">
-    <span class="tab-icon">⚙️</span>
-    <span class="tab-label">设置</span>
+  <div class="tab-item" onclick="showPage('search')">
+    <span class="tab-icon">🔍</span>
+    <span class="tab-label">搜索</span>
   </div>
 </div>
 
@@ -413,11 +364,10 @@ function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.tab-item').forEach((t,i)=>{
-    t.classList.toggle('active',i===0&&name==='home'||i===1&&name==='settings');
+    t.classList.toggle('active',i===0&&name==='home'||i===1&&name==='search');
   });
   if(name==='home')refreshHome();
   if(name==='search')initSearch();
-  if(name==='settings')initSettings();
 }
 
 // ============ 首页逻辑 ============
@@ -610,10 +560,23 @@ function getDefaultPrompt(code){
 function openReport(code){
   currentReportCode=code;
   showPage('report');
-  // 设置默认 prompt，不自动发送，等用户点击
   document.getElementById('prompt-input').value=getDefaultPrompt(code);
-  document.getElementById('report-content').innerHTML='<div class="empty"><div class="empty-icon">💬</div><div class="empty-title">输入你的问题</div><div class="empty-desc">编辑上方 prompt 后点击「发送」开始分析</div></div>';
   document.getElementById('report-loading').style.display='none';
+  // 尝试加载缓存的报告
+  const cached=getSavedReport(code);
+  if(cached){
+    document.getElementById('report-content').innerHTML=renderReport(cached.data)+'<div class="report-timestamp">生成于 '+cached.time+'</div>';
+  }else{
+    document.getElementById('report-content').innerHTML='<div class="empty"><div class="empty-icon">💬</div><div class="empty-title">输入你的问题</div><div class="empty-desc">编辑上方 prompt 后点击「发送」开始分析</div></div>';
+  }
+}
+
+function getSavedReport(code){
+  try{const raw=localStorage.getItem('report:'+code);return raw?JSON.parse(raw):null;}catch(e){return null;}
+}
+function saveReport(code,data){
+  const time=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+  try{localStorage.setItem('report:'+code,JSON.stringify({data,time}));}catch(e){}
 }
 
 function sendPrompt(){
@@ -642,7 +605,9 @@ async function loadReport(code, userPrompt){
       d=await api('/stocks/'+code+'/report');
     }
     loading.style.display='none';
-    content.innerHTML=renderReport(d);
+    saveReport(code,d);
+    const ts=new Date().toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    content.innerHTML=renderReport(d)+'<div class="report-timestamp">生成于 '+ts+'</div>';
   }catch(e){
     loading.style.display='none';
     content.innerHTML='<div class="empty"><div class="empty-title">加载失败</div><div class="empty-desc">请检查网络连接后重试</div><button class="btn btn-primary" onclick="loadReport(\''+code+'\')">重试</button></div>';
@@ -809,25 +774,6 @@ function sigClass(s){
   if(/买入|金叉|多头|放量/.test(s))return'c-red';
   if(/卖出|死叉|空头|缩量/.test(s))return'c-green';
   return'c-gray';
-}
-
-// ============ 设置逻辑 ============
-function initSettings(){
-  document.getElementById('server-url-input').value=BASE_URL;
-}
-function saveServerUrl(){
-  const v=document.getElementById('server-url-input').value.trim();
-  if(v){BASE_URL=v;localStorage.setItem('baseUrl',v);showToast('已保存')}
-}
-function exportWatchlist(){
-  if(!watchlist.length){showToast('自选股列表为空');return}
-  const t=watchlist.map(s=>`${s.name}(${s.code})`).join('、');
-  navigator.clipboard?.writeText(t).then(()=>showToast('已复制到剪贴板')).catch(()=>{prompt('复制以下内容:',t)});
-}
-function clearAllData(){
-  if(confirm('确定清除所有数据？自选股列表将被清空。')){
-    watchlist=[];localStorage.clear();showToast('已清除');refreshHome();
-  }
 }
 
 // ============ 初始化 ============

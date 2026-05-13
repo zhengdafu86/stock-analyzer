@@ -64,6 +64,10 @@ a{color:var(--green);text-decoration:none}
 .stock-center{flex:1.2;text-align:right}
 .stock-price{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
 .stock-right{flex:1.2;display:flex;justify-content:flex-end}
+.stock-row{position:relative}
+.stock-del{position:absolute;right:-2px;top:50%;transform:translateY(-50%);width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text2);border-radius:50%;opacity:0;transition:opacity .2s}
+.stock-row:hover .stock-del{opacity:1}
+@media(hover:none){.stock-del{opacity:0.5}}
 .change-badge{padding:5px 12px;border-radius:6px;font-size:13px;font-weight:600;min-width:72px;text-align:center;font-variant-numeric:tabular-nums}
 
 /* 空状态 */
@@ -116,6 +120,20 @@ a{color:var(--green);text-decoration:none}
 .ai-suggest{background:rgba(0,212,170,.06);border-left:3px solid var(--green);padding:12px 14px;border-radius:0 10px 10px 0}
 .ai-suggest-label{font-size:12px;color:var(--green);font-weight:600;display:block;margin-bottom:4px}
 .ai-suggest-text{font-size:13px;color:var(--text3);line-height:1.7}
+.ai-badge{margin-left:auto;font-size:11px;color:var(--green);background:rgba(0,212,170,.1);padding:2px 8px;border-radius:10px;font-weight:600}
+.ai-md{margin-top:16px;padding:0 2px}
+.ai-md .md-h1{font-size:18px;font-weight:700;color:#fff;margin:20px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.ai-md .md-h2{font-size:16px;font-weight:700;color:#fff;margin:18px 0 8px}
+.ai-md .md-h3{font-size:14px;font-weight:600;color:var(--green);margin:14px 0 6px}
+.ai-md .md-p{font-size:13.5px;color:var(--text3);line-height:2;margin:8px 0;text-align:justify}
+.ai-md strong{color:#fff;font-weight:600}
+.ai-md em{color:var(--yellow);font-style:normal}
+.ai-md .md-ul{margin:8px 0;padding-left:20px;list-style:none}
+.ai-md .md-ul li{font-size:13px;color:var(--text3);line-height:2;position:relative;padding-left:12px}
+.ai-md .md-ul li::before{content:'•';position:absolute;left:0;color:var(--green)}
+.ai-md .md-hr{border:none;border-top:1px solid var(--border);margin:16px 0}
+.ai-md .md-code{background:rgba(0,212,170,.1);color:var(--green);padding:1px 6px;border-radius:4px;font-size:12px}
+.ai-md .md-quote{border-left:3px solid var(--green);padding:8px 14px;margin:10px 0;background:rgba(0,212,170,.05);border-radius:0 8px 8px 0;font-size:13px;color:var(--text3);line-height:1.8}
 
 /* 指标组 */
 .ind-group{margin-top:14px}
@@ -321,6 +339,31 @@ function chgBg(c){if(c==null||isNaN(c))return'bg-gray';return Number(c)>=0?'bg-r
 function fmtTime(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 function fmtDate(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 
+function renderMarkdown(md){
+  if(!md)return'';
+  let h=md
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^### (.+)$/gm,'<h4 class="md-h3">$1</h4>')
+    .replace(/^## (.+)$/gm,'<h3 class="md-h2">$1</h3>')
+    .replace(/^# (.+)$/gm,'<h2 class="md-h1">$1</h2>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^[-*] (.+)$/gm,'<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm,'<li>$2</li>')
+    .replace(/^---$/gm,'<hr class="md-hr">')
+    .replace(/`(.+?)`/g,'<code class="md-code">$1</code>')
+    .replace(/^&gt; (.+)$/gm,'<blockquote class="md-quote">$1</blockquote>');
+  // wrap consecutive <li> in <ul>
+  h=h.replace(/((?:<li>.*<\/li>\s*)+)/g,'<ul class="md-ul">$1</ul>');
+  // paragraphs: double newline
+  h=h.split(/\n{2,}/).map(p=>{
+    p=p.trim();
+    if(!p||p.startsWith('<h')||p.startsWith('<ul')||p.startsWith('<hr')||p.startsWith('<blockquote'))return p;
+    return'<p class="md-p">'+p.replace(/\n/g,'<br>')+'</p>';
+  }).join('');
+  return h;
+}
+
 async function api(url,opt={}){
   const resp=await fetch(BASE_URL+url,{method:opt.method||'GET',headers:{'Content-Type':'application/json'},...(opt.body?{body:JSON.stringify(opt.body)}:{})});
   if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
@@ -375,6 +418,7 @@ async function refreshHome(){
         <div class="stock-left"><span class="stock-name">${name}</span><span class="stock-code">${s.code}</span></div>
         <div class="stock-center"><span class="stock-price ${cc}">${price}</span></div>
         <div class="stock-right"><span class="change-badge ${bg}">${chg}</span></div>
+        <div class="stock-del" onclick="event.stopPropagation();quickDelete(${i},'${name}','${s.code}')">✕</div>
       </div>`;
     });
     list.innerHTML=html;
@@ -387,6 +431,7 @@ async function refreshHome(){
         <div class="stock-left"><span class="stock-name">${s.name||s.code}</span><span class="stock-code">${s.code}</span></div>
         <div class="stock-center"><span class="stock-price c-gray">--</span></div>
         <div class="stock-right"><span class="change-badge bg-gray">--</span></div>
+        <div class="stock-del" onclick="event.stopPropagation();quickDelete(${i},'${s.name||s.code}','${s.code}')">✕</div>
       </div>`;
     });
     list.innerHTML=html;
@@ -426,6 +471,12 @@ function actionDelete(){
       watchlist.splice(currentAction,1);saveWatchlist();refreshHome();
     }
     hideActions();
+  }
+}
+function quickDelete(index,name,code){
+  if(confirm(`删除 ${name}(${code})？`)){
+    watchlist.splice(index,1);saveWatchlist();refreshHome();
+    showToast(`已删除 ${name}`);
   }
 }
 
@@ -558,7 +609,11 @@ function renderReport(d){
 
   // AI 分析
   html+=`<div class="card">
-    <div class="section-head"><span class="section-icon">🤖</span><span class="section-label">AI 智能分析</span></div>
+    <div class="section-head">
+      <span class="section-icon">🤖</span>
+      <span class="section-label">AI 智能分析</span>
+      ${ai.ai_provider?`<span class="ai-badge">${ai.ai_provider}</span>`:''}
+    </div>
     <div class="ai-row">
       <div class="score-ring" style="border-color:${scoreColor}">
         <span class="score-num" style="color:${scoreColor}">${ai.score||'--'}</span>
@@ -566,23 +621,28 @@ function renderReport(d){
       </div>
       <div>
         <span class="signal-badge" style="background:${sc.bg};color:${sc.c}">${ai.signal||'中性'}</span>
-        <div class="ai-summary">${ai.summary||'暂无分析'}</div>
       </div>
     </div>`;
 
-  if(ai.points&&ai.points.length){
-    html+='<div class="ai-points">';
-    ai.points.forEach(p=>{
-      const icon=p.type==='positive'?'✅':p.type==='negative'?'⚠️':'ℹ️';
-      html+=`<div class="ai-point"><span class="ai-point-icon">${icon}</span><span>${p.text}</span></div>`;
-    });
-    html+='</div>';
+  // Markdown 渲染的详细报告
+  if(ai.detail){
+    html+=`<div class="ai-md">${renderMarkdown(ai.detail)}</div>`;
+  } else {
+    // 兼容旧格式
+    if(ai.points&&ai.points.length){
+      html+='<div class="ai-points">';
+      ai.points.forEach(p=>{
+        const icon=p.type==='positive'?'✅':p.type==='negative'?'⚠️':'ℹ️';
+        html+=`<div class="ai-point"><span class="ai-point-icon">${icon}</span><span>${p.text}</span></div>`;
+      });
+      html+='</div>';
+    }
+    if(ai.suggestion){
+      html+=`<div class="ai-suggest"><span class="ai-suggest-label">操作建议</span><span class="ai-suggest-text">${ai.suggestion}</span></div>`;
+    }
   }
 
-  html+=`<div class="ai-suggest">
-    <span class="ai-suggest-label">操作建议</span>
-    <span class="ai-suggest-text">${ai.suggestion||'暂无建议'}</span>
-  </div></div>`;
+  html+=`</div>`;
 
   // 技术指标
   html+=`<div class="card">

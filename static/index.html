@@ -270,7 +270,7 @@ a{color:var(--green);text-decoration:none}
     </div>
     <textarea id="prompt-input" class="prompt-input" rows="3" placeholder="输入你想问的..."></textarea>
     <div class="prompt-actions">
-      <button class="prompt-btn prompt-btn-send" id="prompt-send" onclick="sendPrompt()">发送分析</button>
+      <button class="prompt-btn prompt-btn-send" id="prompt-send" onclick="sendPrompt()">发送</button>
       <button class="prompt-btn prompt-btn-reset" onclick="resetPrompt()">恢复默认</button>
     </div>
   </div>
@@ -600,9 +600,10 @@ function getDefaultPrompt(code){
 function openReport(code){
   currentReportCode=code;
   showPage('report');
-  // 设置默认 prompt
+  // 设置默认 prompt，不自动发送，等用户点击
   document.getElementById('prompt-input').value=getDefaultPrompt(code);
-  loadReport(code);
+  document.getElementById('report-content').innerHTML='<div class="empty"><div class="empty-icon">💬</div><div class="empty-title">输入你的问题</div><div class="empty-desc">编辑上方 prompt 后点击「发送」开始分析</div></div>';
+  document.getElementById('report-loading').style.display='none';
 }
 
 function sendPrompt(){
@@ -621,7 +622,7 @@ async function loadReport(code, userPrompt){
   const loading=document.getElementById('report-loading');
   const sendBtn=document.getElementById('prompt-send');
   content.innerHTML='';loading.style.display='flex';
-  sendBtn.disabled=true;sendBtn.textContent='分析中...';
+  sendBtn.disabled=true;sendBtn.textContent='分析中…';
 
   try{
     let d;
@@ -636,7 +637,7 @@ async function loadReport(code, userPrompt){
     loading.style.display='none';
     content.innerHTML='<div class="empty"><div class="empty-title">加载失败</div><div class="empty-desc">请检查网络连接后重试</div><button class="btn btn-primary" onclick="loadReport(\''+code+'\')">重试</button></div>';
   }
-  sendBtn.disabled=false;sendBtn.textContent='发送分析';
+  sendBtn.disabled=false;sendBtn.textContent='发送';
 }
 
 function renderReport(d){

@@ -167,7 +167,8 @@ def search_stocks(keyword: str) -> list:
         url = 'https://smartbox.gtimg.cn/s3/'
         params = {'v': 2, 'q': keyword, 't': 'gp'}
         resp = _SESSION.get(url, params=params, timeout=5)
-        text = resp.text
+        # 解码 Unicode 转义（兴业 → 兴业）
+        text = resp.text.encode('utf-8').decode('unicode_escape', errors='replace')
 
         # 格式: v_hint="sz~code~name~... ^ sh~code~name~..."
         stocks = []

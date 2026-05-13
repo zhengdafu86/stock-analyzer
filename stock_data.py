@@ -169,7 +169,7 @@ def search_stocks(keyword: str) -> list:
         resp = _SESSION.get(url, params=params, timeout=5)
         text = resp.text
 
-        # 格式: v_hint="gp~code~name~... \n gp~code~name~..."
+        # 格式: v_hint="sz~code~name~... ^ sh~code~name~..."
         stocks = []
         # 提取引号内内容
         match = re.search(r'"([^"]*)"', text)
@@ -179,7 +179,8 @@ def search_stocks(keyword: str) -> list:
         content = match.group(1)
         for line in content.split('^'):
             parts = line.split('~')
-            if len(parts) >= 3 and parts[0] == 'gp':
+            # parts[0] 可能是 gp/sh/sz/GP-A 等
+            if len(parts) >= 3 and parts[1]:
                 code = parts[1]
                 name = parts[2]
                 # 只要 A 股（6/0/3 开头）

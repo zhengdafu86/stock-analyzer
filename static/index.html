@@ -581,7 +581,14 @@ function saveReport(code,data){
 
 function sendPrompt(){
   if(!currentReportCode)return;
-  const prompt=document.getElementById('prompt-input').value.trim();
+  let prompt=document.getElementById('prompt-input').value.trim();
+  if(!prompt)return;
+  // 自动关联当前股票：如果用户输入中没提到股票名，自动加上
+  const stock=watchlist.find(s=>s.code===currentReportCode);
+  const name=stock?stock.name:'';
+  if(name&&!prompt.includes(name)&&!prompt.includes(currentReportCode)){
+    prompt=`关于"${name}"(${currentReportCode})：`+prompt;
+  }
   loadReport(currentReportCode, prompt);
 }
 

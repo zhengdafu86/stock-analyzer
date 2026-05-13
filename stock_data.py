@@ -1,35 +1,35 @@
 """
 股票数据获取模块
-- 东方财富 HTTP API：实时行情、搜索、K线、大盘指数
+- 腾讯财经 API (qt.gtimg.cn)：实时行情、搜索、K线、大盘指数
 - BaoStock：财务基本面数据（利润表、资产负债表、财务指标）
+
+腾讯行情数据格式 (v_shXXXXXX):
+  0:未知 1:名称 2:代码 3:最新价 4:昨收 5:今开 6:成交量(手) 7:外盘 8:内盘
+  9:买一价 10:买一量 11:买二价 ... 29:卖五量
+  30:时间 31:涨跌额 32:涨跌幅% 33:最高 34:最低
+  35:价格/成交量/成交额 36:成交量(手) 37:成交额(万)
+  38:换手率 39:市盈率 41:最高 42:最低 43:振幅
+  44:流通市值(亿) 45:总市值(亿) 46:市净率
 """
 import requests
 import pandas as pd
 import numpy as np
 import traceback
+import re
 import time
 from datetime import datetime, timedelta
 
-# ============ 东方财富 HTTP 通用 ============
+# ============ 腾讯财经 HTTP 通用 ============
 
 _SESSION = requests.Session()
 _SESSION.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Referer': 'https://quote.eastmoney.com/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://stockapp.finance.qq.com/',
 })
 
 # 全量行情缓存
 _spot_cache = {'data': None, 'time': 0}
 SPOT_CACHE_TTL = 15  # 秒
-
-
-def _code_to_secid(code: str) -> str:
-    """股票代码 → 东方财富 secid（1.XXXXXX 沪 / 0.XXXXXX 深）"""
-    code = str(code).strip()
-    if code.startswith(('6', '9', '11')):
-        return f'1.{code}'
-    else:
-        return f'0.{code}'
 
 
 def _safe_float(val, default=0):
@@ -41,87 +41,160 @@ def _safe_float(val, default=0):
         return default
 
 
-def _get_spot_df() -> pd.DataFrame:
-    """东方财富：获取 A 股全量实时行情（带缓存）"""
+def _code_to_tencent(code: str) -> str:
+    """股票代码 → 腾讯格式（sh600519 / sz000858）"""
+    code = str(code).strip()
+    if code.startswith(('6', '9', '11')):
+        return f'sh{code}'
+    else:
+        return f'sz{code}'
+
+
+def _parse_tencent_quote(text: str) -> list:
+    """解析腾讯行情返回数据，返回列表 [{...}, ...]"""
+    results = []
+    # 匹配 v_shXXXXXX="..." 或 v_szXXXXXX="..."
+    pattern = r'v_(\w+)="([^"]*)"'
+    for match in re.finditer(pattern, text):
+        symbol = match.group(1)
+        data = match.group(2)
+        if not data or data.count('~') < 30:
+            continue
+
+        parts = data.split('~')
+        code = parts[2] if len(parts) > 2 else symbol[2:]
+        name = parts[1] if len(parts) > 1 else ''
+
+        results.append({
+            'code': code,
+            'name': name,
+            'price': _safe_float(parts[3]) if len(parts) > 3 else 0,
+            'prev_close': _safe_float(parts[4]) if len(parts) > 4 else 0,
+            'open': _safe_float(parts[5]) if len(parts) > 5 else 0,
+            'volume': _safe_float(parts[6]) if len(parts) > 6 else 0,  # 手
+            'change_amount': _safe_float(parts[31]) if len(parts) > 31 else 0,
+            'change_percent': _safe_float(parts[32]) if len(parts) > 32 else 0,
+            'high': _safe_float(parts[33]) if len(parts) > 33 else 0,
+            'low': _safe_float(parts[34]) if len(parts) > 34 else 0,
+            'amount': _safe_float(parts[37]) * 10000 if len(parts) > 37 else 0,  # 万→元
+            'turnover_rate': _safe_float(parts[38]) if len(parts) > 38 else 0,
+            'pe': _safe_float(parts[39]) if len(parts) > 39 else 0,
+            'pb': _safe_float(parts[46]) if len(parts) > 46 else 0,
+            'float_market_cap': _safe_float(parts[44]) * 1e8 if len(parts) > 44 else 0,  # 亿→元
+            'market_cap': _safe_float(parts[45]) * 1e8 if len(parts) > 45 else 0,  # 亿→元
+        })
+
+    return results
+
+
+# A 股代码列表（用于搜索和批量获取）
+_all_codes_cache = {'data': None, 'time': 0}
+ALL_CODES_CACHE_TTL = 3600  # 1 小时
+
+
+def _get_all_stock_codes() -> list:
+    """获取 A 股全部股票代码列表（用于搜索）"""
     now = time.time()
-    if _spot_cache['data'] is not None and now - _spot_cache['time'] < SPOT_CACHE_TTL:
-        return _spot_cache['data']
+    if _all_codes_cache['data'] is not None and now - _all_codes_cache['time'] < ALL_CODES_CACHE_TTL:
+        return _all_codes_cache['data']
 
-    url = 'https://82.push2.eastmoney.com/api/qt/clist/get'
-    params = {
-        'pn': 1, 'pz': 6000, 'po': 1,
-        'np': 1, 'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
-        'fltt': 2, 'invt': 2, 'fid': 'f3',
-        'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048',
-        'fields': 'f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23',
-    }
-    try:
-        resp = _SESSION.get(url, params=params, timeout=10)
-        data = resp.json()
-        items = data.get('data', {}).get('diff', [])
-        if not items:
-            return _spot_cache.get('data') or pd.DataFrame()
+    codes = []
+    # 沪市主板 600000-605999, 科创板 688000-689999
+    # 深市主板 000001-003999, 中小板 002001-004999, 创业板 300001-301999
+    ranges = [
+        ('sh', 600000, 606000),
+        ('sh', 688000, 690000),
+        ('sz', 0, 5000),
+        ('sz', 300000, 302000),
+    ]
 
-        rows = []
-        for it in items:
-            rows.append({
-                '代码': str(it.get('f12', '')),
-                '名称': str(it.get('f14', '')),
-                '最新价': it.get('f2'),
-                '涨跌幅': it.get('f3'),
-                '涨跌额': it.get('f4'),
-                '成交量': it.get('f5'),
-                '成交额': it.get('f6'),
-                '振幅': it.get('f7'),
-                '换手率': it.get('f8'),
-                '市盈率-动态': it.get('f9'),
-                '市净率': it.get('f23'),
-                '最高': it.get('f15'),
-                '最低': it.get('f16'),
-                '今开': it.get('f17'),
-                '昨收': it.get('f18'),
-                '总市值': it.get('f20'),
-                '流通市值': it.get('f21'),
-            })
+    # 分批请求，每批 50 个
+    batch_size = 80
+    for prefix, start, end in ranges:
+        # 生成所有候选代码
+        candidates = [f'{prefix}{str(i).zfill(6)}' for i in range(start, end)]
+        for i in range(0, len(candidates), batch_size):
+            batch = candidates[i:i + batch_size]
+            query = ','.join(batch)
+            try:
+                resp = _SESSION.get(f'http://qt.gtimg.cn/q={query}', timeout=10)
+                text = resp.text
+                for match in re.finditer(r'v_(\w+)="([^"]*)"', text):
+                    data = match.group(2)
+                    parts = data.split('~')
+                    if len(parts) > 3 and parts[1] and _safe_float(parts[3]) > 0:
+                        codes.append({
+                            'symbol': match.group(1),
+                            'code': parts[2],
+                            'name': parts[1],
+                        })
+            except:
+                continue
 
-        df = pd.DataFrame(rows)
-        _spot_cache['data'] = df
-        _spot_cache['time'] = now
-        return df
-    except Exception as e:
-        print(f"获取全量行情失败: {e}")
-        return _spot_cache.get('data') or pd.DataFrame()
+    if codes:
+        _all_codes_cache['data'] = codes
+        _all_codes_cache['time'] = now
+
+    return codes
 
 
-# ============ 搜索 ============
+def _get_spot_data(tencent_codes: list) -> list:
+    """腾讯：批量获取实时行情"""
+    if not tencent_codes:
+        return []
+
+    all_results = []
+    batch_size = 50
+    for i in range(0, len(tencent_codes), batch_size):
+        batch = tencent_codes[i:i + batch_size]
+        query = ','.join(batch)
+        try:
+            resp = _SESSION.get(f'http://qt.gtimg.cn/q={query}', timeout=10)
+            results = _parse_tencent_quote(resp.text)
+            all_results.extend(results)
+        except Exception as e:
+            print(f"获取行情失败: {e}")
+
+    return all_results
+
+
+# ============ 搜索（轻量方案：用腾讯 suggest 接口）============
 
 def search_stocks(keyword: str) -> list:
     """搜索 A 股股票，支持代码和名称模糊匹配"""
     try:
-        df = _get_spot_df()
-        if df.empty:
+        # 腾讯智能联想搜索接口
+        url = 'https://smartbox.gtimg.cn/s3/'
+        params = {'v': 2, 'q': keyword, 't': 'gp'}
+        resp = _SESSION.get(url, params=params, timeout=5)
+        text = resp.text
+
+        # 格式: v_hint="gp~code~name~... \n gp~code~name~..."
+        stocks = []
+        # 提取引号内内容
+        match = re.search(r'"([^"]*)"', text)
+        if not match:
             return []
 
-        mask = (
-            df['代码'].astype(str).str.contains(keyword, na=False)
-            | df['名称'].astype(str).str.contains(keyword, na=False)
-        )
-        results = df[mask].head(20)
+        content = match.group(1)
+        for line in content.split('^'):
+            parts = line.split('~')
+            if len(parts) >= 3 and parts[0] == 'gp':
+                code = parts[1]
+                name = parts[2]
+                # 只要 A 股（6/0/3 开头）
+                if code and code[0] in ('6', '0', '3'):
+                    if code.startswith('3'):
+                        market = '创业板'
+                    elif code.startswith('68'):
+                        market = '科创板'
+                    elif code.startswith('6'):
+                        market = '上海'
+                    else:
+                        market = '深圳'
+                    stocks.append({'code': code, 'name': name, 'market': market})
 
-        stocks = []
-        for _, row in results.iterrows():
-            code = str(row['代码'])
-            name = str(row['名称'])
-            if code.startswith('3'):
-                market = '创业板'
-            elif code.startswith('68'):
-                market = '科创板'
-            elif code.startswith('6'):
-                market = '上海'
-            else:
-                market = '深圳'
-            stocks.append({'code': code, 'name': name, 'market': market})
-        return stocks
+        return stocks[:20]
     except Exception as e:
         print(f"搜索股票失败: {e}")
         traceback.print_exc()
@@ -133,33 +206,12 @@ def search_stocks(keyword: str) -> list:
 def get_stock_quote(code: str) -> dict:
     """获取单只股票实时行情"""
     try:
-        df = _get_spot_df()
-        if df.empty:
-            return {}
-
-        row = df[df['代码'] == code]
-        if row.empty:
-            return {}
-
-        row = row.iloc[0]
-        return {
-            'code': code,
-            'name': str(row.get('名称', '')),
-            'price': _safe_float(row.get('最新价')),
-            'change_percent': _safe_float(row.get('涨跌幅')),
-            'change_amount': _safe_float(row.get('涨跌额')),
-            'volume': _safe_float(row.get('成交量')),
-            'amount': _safe_float(row.get('成交额')),
-            'open': _safe_float(row.get('今开')),
-            'high': _safe_float(row.get('最高')),
-            'low': _safe_float(row.get('最低')),
-            'prev_close': _safe_float(row.get('昨收')),
-            'turnover_rate': _safe_float(row.get('换手率')),
-            'pe': _safe_float(row.get('市盈率-动态')),
-            'pb': _safe_float(row.get('市净率')),
-            'market_cap': _safe_float(row.get('总市值')),
-            'float_market_cap': _safe_float(row.get('流通市值')),
-        }
+        tc = _code_to_tencent(code)
+        resp = _SESSION.get(f'http://qt.gtimg.cn/q={tc}', timeout=10)
+        results = _parse_tencent_quote(resp.text)
+        if results:
+            return results[0]
+        return {}
     except Exception as e:
         print(f"获取行情失败 {code}: {e}")
         traceback.print_exc()
@@ -169,80 +221,84 @@ def get_stock_quote(code: str) -> dict:
 def get_batch_quotes(codes: list) -> dict:
     """批量获取实时行情"""
     try:
-        df = _get_spot_df()
-        if df.empty:
-            return {}
+        tc_codes = [_code_to_tencent(c) for c in codes]
+        results = _get_spot_data(tc_codes)
 
-        result = {}
-        for code in codes:
-            row = df[df['代码'] == code]
-            if not row.empty:
-                row = row.iloc[0]
-                result[code] = {
-                    'name': str(row.get('名称', '')),
-                    'price': _safe_float(row.get('最新价')),
-                    'change_percent': _safe_float(row.get('涨跌幅')),
-                    'volume': _safe_float(row.get('成交量')),
-                    'turnover_rate': _safe_float(row.get('换手率')),
-                    'has_report': True,
-                }
-        return result
+        output = {}
+        for r in results:
+            output[r['code']] = {
+                'name': r['name'],
+                'price': r['price'],
+                'change_percent': r['change_percent'],
+                'volume': r['volume'],
+                'turnover_rate': r['turnover_rate'],
+                'has_report': True,
+            }
+        return output
     except Exception as e:
         print(f"批量获取行情失败: {e}")
         traceback.print_exc()
         return {}
 
 
-# ============ K 线数据（东方财富） ============
+# ============ K 线数据（腾讯日K） ============
 
 def get_kline_data(code: str, period: str = 'daily', count: int = 120) -> pd.DataFrame:
-    """东方财富：获取历史 K 线数据（前复权）"""
+    """腾讯财经：获取历史 K 线数据（前复权）"""
     try:
-        secid = _code_to_secid(code)
-        klt_map = {'daily': '101', 'weekly': '102', 'monthly': '103'}
-        klt = klt_map.get(period, '101')
+        tc = _code_to_tencent(code)
+        period_map = {'daily': 'day', 'weekly': 'week', 'monthly': 'month'}
+        klt = period_map.get(period, 'day')
 
-        end_date = datetime.now().strftime('%Y%m%d')
-        start_date = (datetime.now() - timedelta(days=count * 3)).strftime('%Y%m%d')
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_year = datetime.now().year - 1
+        start_date = f'{start_year}-01-01'
 
-        url = 'https://push2his.eastmoney.com/api/qt/stock/kline/get'
+        # 腾讯 K 线接口
+        url = f'http://web.ifzq.gtimg.cn/appstock/app/fqkline/get'
         params = {
-            'secid': secid,
-            'ut': 'fa5fd1943c7b386f172d6893dbbd4dc0',
-            'fields1': 'f1,f2,f3,f4,f5,f6',
-            'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
-            'klt': klt,
-            'fqt': 1,  # 前复权
-            'beg': start_date,
-            'end': end_date,
-            'lmt': count,
+            'param': f'{tc},{klt},{start_date},{end_date},{count},qfq',
         }
 
         resp = _SESSION.get(url, params=params, timeout=10)
         data = resp.json()
-        klines = data.get('data', {}).get('klines', [])
+
+        # 提取 K 线数据
+        stock_data = data.get('data', {}).get(tc, {})
+        klines = stock_data.get(f'qfq{klt}', stock_data.get(klt, []))
+
         if not klines:
             return pd.DataFrame()
 
         rows = []
-        for line in klines:
-            parts = line.split(',')
-            if len(parts) >= 11:
+        for k in klines:
+            if len(k) >= 6:
                 rows.append({
-                    'date': parts[0],
-                    'open': float(parts[1]),
-                    'close': float(parts[2]),
-                    'high': float(parts[3]),
-                    'low': float(parts[4]),
-                    'volume': float(parts[5]),
-                    'amount': float(parts[6]),
-                    'amplitude': float(parts[7]),
-                    'change_pct': float(parts[8]),
-                    'change_amt': float(parts[9]),
-                    'turnover_rate': float(parts[10]),
+                    'date': k[0],
+                    'open': float(k[1]),
+                    'close': float(k[2]),
+                    'high': float(k[3]),
+                    'low': float(k[4]),
+                    'volume': float(k[5]),
+                    'amount': 0,
+                    'amplitude': 0,
+                    'change_pct': 0,
+                    'change_amt': 0,
+                    'turnover_rate': 0,
                 })
 
+        if not rows:
+            return pd.DataFrame()
+
         df = pd.DataFrame(rows)
+
+        # 计算涨跌幅和振幅
+        if len(df) > 1:
+            df['change_pct'] = df['close'].pct_change() * 100
+            df['change_amt'] = df['close'].diff()
+            df['amplitude'] = (df['high'] - df['low']) / df['close'].shift(1) * 100
+            df = df.fillna(0)
+
         return df.tail(count)
     except Exception as e:
         print(f"获取K线数据失败 {code}: {e}")
@@ -322,7 +378,7 @@ def _get_recent_report_dates():
 
 
 def get_fundamentals(code: str) -> dict:
-    """获取基本面数据：估值来自东方财富实时行情，财务指标来自 BaoStock"""
+    """获取基本面数据：估值来自腾讯实时行情，财务指标来自 BaoStock"""
     result = {}
 
     # ---------- 1. 从实时行情获取估值 ----------
@@ -392,23 +448,6 @@ def get_fundamentals(code: str) -> dict:
         print(f"获取财务指标失败 {code}: {e}")
         traceback.print_exc()
 
-    # ---------- 3. 行业信息（东方财富个股详情） ----------
-    try:
-        secid = _code_to_secid(code)
-        url = 'https://push2.eastmoney.com/api/qt/stock/get'
-        params = {
-            'secid': secid,
-            'ut': 'fa5fd1943c7b386f172d6893dbbd4dc0',
-            'fields': 'f57,f58,f127,f128,f129,f130,f131,f132,f133,f134,f135',
-            'invt': 2,
-        }
-        resp = _SESSION.get(url, params=params, timeout=5)
-        info = resp.json().get('data', {})
-        if info:
-            result['industry'] = info.get('f127', '--')
-    except:
-        pass
-
     # ---------- 默认值填充 ----------
     defaults = {
         'pe': 0, 'pb': 0, 'ps': 0, 'market_cap': 0,
@@ -425,20 +464,13 @@ def get_fundamentals(code: str) -> dict:
     return result
 
 
-# ============ 大盘指数（东方财富） ============
+# ============ 大盘指数（腾讯） ============
 
 def get_market_overview() -> dict:
     """获取大盘指数概览（上证/深证/创业板）"""
     try:
-        url = 'https://push2.eastmoney.com/api/qt/ulist.np/get'
-        params = {
-            'fltt': 2,
-            'fields': 'f2,f3,f4,f12,f14',
-            'secids': '1.000001,0.399001,0.399006',
-        }
-        resp = _SESSION.get(url, params=params, timeout=5)
-        data = resp.json()
-        items = data.get('data', {}).get('diff', [])
+        resp = _SESSION.get('http://qt.gtimg.cn/q=sh000001,sz399001,sz399006', timeout=10)
+        text = resp.text
 
         result = {}
         name_map = {
@@ -446,12 +478,16 @@ def get_market_overview() -> dict:
             '399001': ('sz_index', 'sz_change'),
             '399006': ('cyb_index', 'cyb_change'),
         }
-        for it in items:
-            code = str(it.get('f12', ''))
-            if code in name_map:
-                idx_key, chg_key = name_map[code]
-                result[idx_key] = _safe_float(it.get('f2'))
-                result[chg_key] = _safe_float(it.get('f3'))
+
+        for match in re.finditer(r'v_(\w+)="([^"]*)"', text):
+            data = match.group(2)
+            parts = data.split('~')
+            if len(parts) > 32:
+                code = parts[2]
+                if code in name_map:
+                    idx_key, chg_key = name_map[code]
+                    result[idx_key] = _safe_float(parts[3])
+                    result[chg_key] = _safe_float(parts[32])
 
         return result
     except Exception as e:

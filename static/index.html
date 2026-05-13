@@ -14,11 +14,16 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{--green:#00d4aa;--red:#ff4757;--yellow:#ffc700;--orange:#ff9f43;--bg:#0f0f1a;--bg2:#1a1a2e;--bg3:#16213e;--text:#e0e0e0;--text2:#8a8a9a;--text3:#c0c0d0;--border:rgba(255,255,255,0.05)}
 body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+html{background:var(--bg);overscroll-behavior-y:none}
 a{color:var(--green);text-decoration:none}
 
-/* 安全区域适配 */
-.safe-top{padding-top:env(safe-area-inset-top,20px)}
-.safe-bottom{padding-bottom:calc(env(safe-area-inset-bottom,0px) + 60px)}
+/* 安全区域适配 - PWA standalone 模式 */
+.safe-top{padding-top:max(env(safe-area-inset-top,20px),20px)}
+.safe-bottom{padding-bottom:calc(max(env(safe-area-inset-bottom,0px),8px) + 60px)}
+@media all and (display-mode:standalone){
+  .safe-top{padding-top:max(env(safe-area-inset-top,48px),48px)}
+  .safe-bottom{padding-bottom:calc(max(env(safe-area-inset-bottom,20px),20px) + 60px)}
+}
 
 /* 页面容器 */
 .page{display:none;min-height:100vh;padding:0 16px}
@@ -26,7 +31,8 @@ a{color:var(--green);text-decoration:none}
 .page-title{font-size:28px;font-weight:700;color:#fff;padding:16px 0 12px}
 
 /* 底部导航 */
-.tab-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);display:flex;padding:8px 0 calc(env(safe-area-inset-bottom,8px));z-index:100}
+.tab-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);display:flex;padding:8px 0 max(env(safe-area-inset-bottom,8px),8px);z-index:100}
+@media all and (display-mode:standalone){.tab-bar{padding-bottom:max(env(safe-area-inset-bottom,20px),20px)}}
 .tab-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0;cursor:pointer;transition:color .2s}
 .tab-item .tab-icon{font-size:22px;opacity:.5}
 .tab-item .tab-label{font-size:10px;color:var(--text2)}
@@ -78,6 +84,7 @@ a{color:var(--green);text-decoration:none}
 
 /* 搜索 */
 .search-wrap{position:sticky;top:0;padding:8px 0;z-index:10;background:var(--bg)}
+@media all and (display-mode:standalone){.search-wrap{top:-1px;padding-top:8px}}
 .search-box{display:flex;align-items:center;background:var(--bg2);border-radius:50px;padding:0 16px;border:1.5px solid rgba(0,212,170,.25)}
 .search-box input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:15px;padding:10px 8px}
 .search-box input::placeholder{color:#5a5a6a}
